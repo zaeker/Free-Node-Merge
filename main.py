@@ -6,10 +6,12 @@ import time
 
 # 配置
 sub_url = [
-    "https://raw.fastgit.org/freefq/free/master/v2",
-    "https://raw.fastgit.org/v2ray-links/v2ray-free/master/v2ray",
-    "https://jiang.netlify.app",
-    "https://raw.fastgit.org/ssrsub/ssr/raw/master/V2Ray"
+    "https://raw.githubusercontent.com/freefq/free/master/v2",
+    "https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray",
+    "https://raw.githubusercontent.com/ermaozi/get_falcao_near/main/v2ray",
+    "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub",
+    "https://raw.githubusercontent.com/v2raypool/v2raypool/main/v2ray.txt",
+    "https://raw.githubusercontent.com/zk4/free/main/v2ray"
 ]
 
 # 下载订阅链接将其合并
