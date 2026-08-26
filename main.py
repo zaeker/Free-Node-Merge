@@ -1,79 +1,110 @@
 import requests
 import base64
 import re
+import socket
+import json
+import concurrent.futures
 
-# 配置：替换为目前全网最大的几个白嫖聚合源
-sub_url = [
-    "https://raw.githubusercontent.com/mahdibland/ShadowsocksAggregator/master/sub/sub_merge.txt",
-    "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub",
-    "https://raw.githubusercontent.com/barry-far/V2ray-Configs/main/Sub1.txt",
-    "https://raw.githubusercontent.com/barry-far/V2ray-Configs/main/Sub2.txt",
-    "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt",
-    "https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray",
-    "https://raw.githubusercontent.com/ermaozi/get_falcao_near/main/v2ray",
-    "https://raw.githubusercontent.com/tbbatbb/Proxy/master/manual/v2ray.txt"
-]
-
-# 增加请求头伪装，防止被源站的防爬墙直接拦截
+# 伪装请求头
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 }
 
+# TG 实时频道源 (带 /s/ 后缀可绕过登录)
+tg_channels = [
+    "https://t.me/s/v2ray_share",
+    "https://t.me/s/v2raypro",
+    "https://t.me/s/V2List"
+]
+
+# 保底的静态超大源
+static_urls = [
+    "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub",
+    "https://raw.githubusercontent.com/barry-far/V2ray-Configs/main/Sub1.txt"
+]
+
 def safe_b64decode(s):
-    """安全解码，补齐缺失的 '='"""
+    """安全解码 Base64"""
     s = str(s).strip()
-    missing_padding = len(s) % 4
-    if missing_padding:
-        s += '=' * (4 - missing_padding)
+    s += '=' * ((4 - len(s) % 4) % 4)
     try:
         return base64.b64decode(s).decode("utf-8", errors="ignore")
     except:
         return ""
 
-merged_link = []
-print("开始极速抓取超级节点源...")
-
-for url in sub_url:
+def check_node(node):
+    """核心存活检测：只敲门不进屋，1.5秒定生死"""
     try:
-        # 加上 headers 伪装
-        rq = requests.get(url, headers=HEADERS, timeout=10)
-        if rq.status_code != 200:
-            print(f"请求失败 (状态码 {rq.status_code}): {url}")
-            continue
-        
-        content = rq.text.strip()
-        decoded_content = safe_b64decode(content)
-        
-        # 智能判断：如果是 base64 解码后包含节点标识，就用解码后的；否则用原始文本
-        if any(protocol in decoded_content for protocol in ["vmess://", "vless://", "trojan://", "ss://"]):
-            lines = decoded_content.splitlines()
+        ip, port = "", 0
+        # 解析 Vmess
+        if node.lower().startswith("vmess://"):
+            b64_str = node[8:]
+            b64_str += "=" * ((4 - len(b64_str) % 4) % 4)
+            info = json.loads(base64.b64decode(b64_str).decode('utf-8', 'ignore'))
+            ip, port = info.get("add"), info.get("port")
+        # 解析 Vless / Trojan / SS 等
         else:
-            lines = content.splitlines()
+            match = re.search(r'@([^:]+):(\d+)', node)
+            if match:
+                ip, port = match.groups()
+        
+        # TCP 并发测活
+        if ip and port:
+            socket.create_connection((ip, int(port)), timeout=1.5).close()
+            return node
+    except Exception:
+        pass
+    return None
 
-        count = 0
-        for line in lines:
-            line = line.strip()
-            # 放宽正则匹配，兼容更多协议格式
-            if re.match(r'^(vmess|vless|trojan|ss|ssr|hysteria|hy2|tuic)://', line, re.IGNORECASE):
-                merged_link.append(line)
-                count += 1
-                
-        print(f"成功抓取 {count} 个节点来自: {url}")
-    except Exception as e:
-        print(f"抓取异常跳过: {url} | 错误: {e}")
+def main():
+    merged_link = []
 
-# 极速去重
-unique_nodes = list(dict.fromkeys(merged_link))
+    print("第一阶段：抓取 TG 实时热乎节点...")
+    for url in tg_channels:
+        try:
+            rq = requests.get(url, headers=HEADERS, timeout=10)
+            nodes = re.findall(r'(?:vmess|vless|trojan|ss|ssr|hysteria2?)://[^\s\'"<br>]+', rq.text, re.IGNORECASE)
+            merged_link.extend(nodes)
+            print(f" -> 成功从 {url} 提取 {len(nodes)} 个节点")
+        except:
+            pass
 
-# 重新打包成 Base64 并写入文件
-try:
-    final_str = "\n".join(unique_nodes)
-    res = base64.b64encode(final_str.encode("utf-8")).decode("utf-8")
-    with open('node.txt', 'w', encoding='utf-8') as f:
-        f.write(res)
+    print("\n第二阶段：抓取 GitHub 基础大本营...")
+    for url in static_urls:
+        try:
+            rq = requests.get(url, headers=HEADERS, timeout=10)
+            content = safe_b64decode(rq.text) if "://" not in rq.text else rq.text
+            nodes = re.findall(r'(?:vmess|vless|trojan|ss|ssr|hysteria2?)://[^\s\'"<br>]+', content, re.IGNORECASE)
+            merged_link.extend(nodes)
+            print(f" -> 成功从 {url} 提取 {len(nodes)} 个节点")
+        except:
+            pass
+
+    # 极速去重
+    unique_nodes = list(dict.fromkeys(merged_link))
+    print(f"\n第三阶段：多线程死神模式启动！共 {len(unique_nodes)} 个节点准备受死...")
+
+    alive_nodes = []
+    # 开启 50 个并发线程，速度飙升 50 倍
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+        results = executor.map(check_node, unique_nodes)
+        for res in results:
+            if res:
+                alive_nodes.append(res)
+
     print(f"\n======================================")
-    print(f"大功告成！共合并去重得到 {len(unique_nodes)} 个有效节点。")
+    print(f"大功告成！并发淘汰后，斩获 {len(alive_nodes)} 个高优可用节点。")
     print(f"======================================")
-except Exception as e:
-    print(f"写入文件失败: {e}")
+
+    # 重新打包成 Base64 并写入文件
+    if alive_nodes:
+        final_str = "\n".join(alive_nodes)
+        res = base64.b64encode(final_str.encode("utf-8")).decode("utf-8")
+        try:
+            with open('node.txt', 'w', encoding='utf-8') as f:
+                f.write(res)
+        except Exception as e:
+            print(f"写入文件失败: {e}")
+
+if __name__ == '__main__':
+    main()
