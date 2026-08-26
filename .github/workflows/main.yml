@@ -32,6 +32,6 @@ jobs:
           git add .
           git commit -m "Auto Update by Action" -a
       - name: Push changes
-        uses: ad-m/github-push-action@master
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          commit_message: "Auto update active nodes"
