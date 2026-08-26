@@ -1,97 +1,68 @@
 import requests
-import json
 import base64
 import re
-import time
 
-# 配置项：保持你的源不动
+# 配置：大幅增加高频更新的节点源
 sub_url = [
     "https://raw.githubusercontent.com/freefq/free/master/v2",
     "https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray",
     "https://raw.githubusercontent.com/ermaozi/get_falcao_near/main/v2ray",
     "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub",
     "https://raw.githubusercontent.com/v2raypool/v2raypool/main/v2ray.txt",
-    "https://raw.githubusercontent.com/zk4/free/main/v2ray"
+    "https://raw.githubusercontent.com/zk4/free/main/v2ray",
+    "https://raw.githubusercontent.com/barry-far/V2ray-Configs/main/All_Configs_Sub.txt",
+    "https://raw.githubusercontent.com/mftv/Free-Nodes/main/v2ray",
+    "https://raw.githubusercontent.com/tbbatbb/Proxy/master/manual/v2ray.txt"
 ]
 
 def safe_b64decode(s):
-    """安全解码，别再让缺失的等号搞崩你的程序了"""
+    """安全解码，补齐缺失的 '='"""
     s = str(s).strip()
     missing_padding = len(s) % 4
     if missing_padding:
         s += '=' * (4 - missing_padding)
     try:
         return base64.b64decode(s).decode("utf-8", errors="ignore")
-    except Exception as e:
-        print(f"[解码报错] 忽略该错误跳过: {e}")
+    except:
         return ""
 
-sub_link = []
+merged_link = []
+print("开始极速抓取节点...")
+
 for url in sub_url:
     try:
-        rq = requests.get(url, timeout=10) # 加上超时，别死等
+        # 缩短超时时间，遇到死链直接跳过，不浪费时间
+        rq = requests.get(url, timeout=8)
         if rq.status_code != 200:
-            print(f"[GET Code {rq.status_code}] 下载失败: {url}")
             continue
-        print(f"成功抓取订阅源: {url}")
-        sub_link.append(safe_b64decode(rq.text))
+        
+        content = rq.text.strip()
+        # 尝试整体 Base64 解码，判断是普通文本还是 Base64 订阅
+        decoded_content = safe_b64decode(content)
+        if "vmess://" in decoded_content or "vless://" in decoded_content or "trojan://" in decoded_content:
+            lines = decoded_content.splitlines()
+        else:
+            lines = content.splitlines()
+
+        for line in lines:
+            line = line.strip()
+            # 只要是标准协议，无脑收录，绝不浪费时间去测 IP
+            if re.match(r'^(vmess|vless|trojan|ss|ssr|hysteria|hy2)://', line):
+                merged_link.append(line)
+                
+        print(f"成功抓取并解析: {url}")
     except Exception as e:
-        print(f"[抓取异常] {url} - {e}")
+        print(f"抓取失败跳过: {url}")
 
-country_count = {}
-merged_link = []
+# 极速去重（利用字典键的唯一性瞬间完成去重，并保持原有顺序）
+unique_nodes = list(dict.fromkeys(merged_link))
 
-print("\n开始解析并测试节点...")
-for content in sub_link:
-    for line in content.splitlines():
-        line = line.strip()
-        if not line: 
-            continue
-        
-        # 兼容 vmess 并执行你的重命名逻辑
-        if line.startswith("vmess://"):
-            try:
-                node_str = safe_b64decode(line[8:])
-                if not node_str: 
-                    continue
-                node = json.loads(node_str)
-                
-                # 你非要查 IP，那就查，但给我加上延迟防封！
-                rq = requests.get(f"http://ip-api.com/json/{node['add']}?lang=zh-CN", timeout=5)
-                ip_info = rq.json()
-                
-                if ip_info.get('status') == 'success':
-                    ip_country = ip_info.get('country', 'Unknown')
-                    country_count[ip_country] = country_count.get(ip_country, 0) + 1
-                    
-                    # 容错处理 org 为空的情况
-                    org_name = re.split(',| ', ip_info.get('org', 'Unknown'))[0]
-                    newname = f"{ip_country} {country_count[ip_country]:02d} {org_name}"
-                    
-                    print(f"重命名节点: {node.get('ps', '未命名')} -> {newname}")
-                    node['ps'] = newname
-                
-                # 重新打包回 vmess 格式
-                bs = "vmess://" + base64.b64encode(json.dumps(node, ensure_ascii=False).encode("utf-8")).decode("utf-8")
-                merged_link.append(bs)
-                
-                # 必须休眠，否则 API 会拉黑你
-                time.sleep(1.5) 
-                
-            except Exception as e:
-                print(f"[Vmess 解析/测试失败] {e}")
-        
-        # 兼容 vless / trojan / ss (直接收录，跳过 API 查询防止慢死)
-        elif re.match(r'^(vless|trojan|ss)://', line):
-            merged_link.append(line)
-            print(f"直接收录非 Vmess 协议节点: {line[:30]}...")
-
-# 写入文件
+# 重新打包成 Base64 并写入文件
 try:
-    final_str = "\n".join(merged_link)
+    final_str = "\n".join(unique_nodes)
     res = base64.b64encode(final_str.encode("utf-8")).decode("utf-8")
     with open('node.txt', 'w', encoding='utf-8') as f:
         f.write(res)
-    print(f"\n大功告成！整理合并成功，共收录 {len(merged_link)} 个节点。")
+    print(f"\n大功告成！极速抓取并去重完成，共收录 {len(unique_nodes)} 个有效节点。")
 except Exception as e:
     print(f"写入文件失败: {e}")
